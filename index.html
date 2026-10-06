@@ -15,9 +15,9 @@
    fallbacks used until the booth has loaded the event's settings once.
    ============================================================== */
 const CONFIG = {
-  UPLOAD_URL: 'https://script.google.com/macros/s/AKfycbxilYy4WQt-_xy1vy72uMppXL_y0_j-gtZR-1GfbwLkxEM8sat0qrdnabjgERoVsOQp9A/exec', // ends in /exec
-  UPLOAD_KEY: '3f8a2c71-9b4e-4d0a-a6c2-7e1f5b9d8c34',  // same as in Code.gs
-  EVENT_NAME: 'Happy Birthday Izza',
+  UPLOAD_URL: 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE', // ends in /exec
+  UPLOAD_KEY: 'CHANGE-ME-to-a-long-random-string',  // same as in Code.gs
+  EVENT_NAME: 'Our Event',
   EVENT_LINE: 'October 2026',      // smaller line under the name; '' to hide
   LOGO_URL: 'logo.png',            // must be on the same site as this page; '' to hide
   ACCENT: '#FF6F59',
@@ -72,6 +72,7 @@ const CONFIG = {
     --pill:rgba(255,248,238,.92); --mini-bg:#EFE7DA; --mini-cell:rgba(16,35,63,.28);
     --shadow:0 14px 40px rgba(16,35,63,.18); --spin-track:rgba(16,35,63,.12); }
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
     font:20px/1.4 var(--display);user-select:none;-webkit-user-select:none;touch-action:manipulation}
   #video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}

@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photobooth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+/* ======================= EVENT SETTINGS ======================= */
+const CONFIG = {
+  UPLOAD_URL: 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE', // ends in /exec
+  UPLOAD_KEY: 'CHANGE-ME-to-a-long-random-string',  // same as in Code.gs
+  EVENT_NAME: 'Our Event',
+  EVENT_LINE: 'October 2026',      // smaller line under the name; '' to hide
+  LOGO_URL: 'logo.png',            // must be on the same site as this page; '' to hide
+  ACCENT: '#FF6F59',
+  THEME: 'light',                  // 'light' or 'dark' — screens and the photo branding
+
+  MODES: ['photo', 'collage', 'boomerang'],  // remove any you don't want at this event
+  COLLAGE_LAYOUTS: ['grid', 'strip'],        // one entry = no layout question
+
+  // Optional transparent PNG frames, on the same site. '' = default name band.
+  // Sizes: photo and boomerang 1920x1080, grid 1920x1280, strip 1080x2700
+  FRAMES: { photo: '', grid: '', strip: '' },
+
+  COUNTDOWN: 3,                    // seconds before the first shot
+  COLLAGE_GAP_SECONDS: 2,          // seconds between collage shots
+  REVIEW_SECONDS: 10,              // auto-continue on the review screen
+  QR_SECONDS: 45,                  // back to start after this
+
+  BOOMERANG: {
+    format: 'auto',                // 'auto' = MP4 if the device can, else GIF; or 'mp4' / 'gif'
+    frames: 20,                    // frames captured
+    intervalMs: 65,                // gap between captured frames (20 x 65ms = 1.3s of motion)
+    fps: 25,                       // playback speed
+    loops: 3,                      // MP4 only: back-and-forth repeats in the video (GIFs loop forever)
+    width: 720,                    // MP4 width in pixels
+    gifWidth: 480                  // GIF width in pixels (smaller keeps files light)
+  }
+};
+/* ============================================================== */
+</script>
+<style>
+  :root{ --ink:#10233F; --paper:#FFF8EE; --accent:#FF6F59;
+    --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+    /* dark theme (default) */
+    --bg:#10233F; --fg:#FFF8EE;
+    --scrim:16,35,63; --card:rgba(255,248,238,.1); --line:rgba(255,248,238,.28);
+    --pill:rgba(16,35,63,.75); --mini-bg:#0A1830; --mini-cell:rgba(255,248,238,.4);
+    --shadow:0 20px 60px rgba(0,0,0,.4); --spin-track:rgba(255,248,238,.2); }
+  :root[data-theme="light"]{
+    --bg:#FFF8EE; --fg:#10233F;
+    --scrim:255,248,238; --card:#FFFFFF; --line:rgba(16,35,63,.14);
+    --pill:rgba(255,248,238,.92); --mini-bg:#EFE7DA; --mini-cell:rgba(16,35,63,.28);
+    --shadow:0 14px 40px rgba(16,35,63,.18); --spin-track:rgba(16,35,63,.12); }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font:20px/1.4 var(--display);user-select:none;-webkit-user-select:none;touch-action:manipulation}
+  video#video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  .screen{position:fixed;inset:0;display:none}
+  .screen.on{display:flex}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+  button:focus-visible{outline:4px solid var(--accent);outline-offset:3px}
+  .btn{padding:22px 44px;border-radius:16px;font-size:26px;font-weight:800}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.quiet{color:var(--fg);box-shadow:inset 0 0 0 3px var(--line)}
+
+  /* Start: mode picker over the live camera */
+  #attract{align-items:flex-end;padding:48px 56px;
+    background:linear-gradient(to top,rgba(var(--scrim),.94) 0%,rgba(var(--scrim),.65) 38%,rgba(var(--scrim),0) 70%)}
+  #attract .panel{width:100%}
+  #attract .name{font-size:26px;font-weight:500;opacity:.85;margin:0}
+  #attract .cta{font-size:58px;font-weight:800;line-height:1.05;margin:4px 0 24px;letter-spacing:-.02em}
+  #attract .cta span{color:var(--accent)}
+  .modes{display:flex;gap:18px}
+  .mode{flex:1;text-align:left;padding:22px 26px;border-radius:20px;background:var(--card);
+    box-shadow:inset 0 0 0 2px var(--line)}
+  .mode:active{background:var(--accent);color:#fff;box-shadow:none}
+  .mode b{display:block;font-size:36px;font-weight:800;line-height:1.1}
+  .mode small{font-size:19px;opacity:.75}
+
+  /* Collage layout picker */
+  #layout{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:32px}
+  #layout h2{font-size:48px;margin:0;font-weight:800}
+  .layouts{display:flex;gap:28px}
+  .lay{display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px 40px;border-radius:22px;
+    background:var(--card);box-shadow:inset 0 0 0 2px var(--line);min-width:280px}
+  .lay:active{box-shadow:inset 0 0 0 3px var(--accent)}
+  .lay b{font-size:34px;font-weight:800}
+  .lay small{font-size:19px;opacity:.75;margin-top:-10px}
+  .mini{display:grid;gap:6px;padding:8px;border-radius:10px;background:var(--mini-bg);height:170px}
+  .mini i{background:var(--mini-cell);border-radius:4px}
+  .mini.grid{grid-template-columns:1fr 1fr;aspect-ratio:3/2}
+  .mini.strip{grid-template-rows:repeat(4,1fr);width:76px}
+
+  /* Countdown / recording (over the live camera, so the number stays white) */
+  #countdown{flex-direction:column;align-items:center;justify-content:center}
+  #cdLabel{font-size:30px;font-weight:800;padding:10px 26px;border-radius:40px;background:var(--pill);color:var(--fg);margin:0}
+  #cdLabel.rec{background:#D93A3A;color:#fff}
+  #count{font-size:min(44vh,400px);font-weight:800;line-height:1;color:#fff;text-shadow:0 10px 60px rgba(0,0,0,.45);min-height:1em}
+  #count.tick{animation:tick .9s ease-out}
+  @keyframes tick{from{transform:scale(1.35);opacity:0}25%{opacity:1}to{transform:scale(1)}}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
+  #flash.go{animation:flash .5s ease-out}
+  @keyframes flash{from{opacity:1}to{opacity:0}}
+
+  /* Processing */
+  #processing{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:22px}
+  .spin{width:72px;height:72px;border-radius:50%;border:6px solid var(--spin-track);border-top-color:var(--accent);
+    animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #processing p{font-size:32px;font-weight:800;margin:0}
+
+  /* Review + share */
+  #review,#share{background:var(--bg);align-items:center;justify-content:center;padding:36px}
+  #review{flex-direction:column;gap:26px}
+  #share{gap:48px}
+  .media img,.media video{display:block;border-radius:14px;box-shadow:var(--shadow)}
+  #reviewMedia img,#reviewMedia video{max-width:88vw;max-height:70vh}
+  #shareMedia img,#shareMedia video{max-width:46vw;max-height:78vh}
+  .row{display:flex;gap:20px}
+  #share .side{display:flex;flex-direction:column;align-items:flex-start;gap:20px;max-width:420px}
+  #share h2{font-size:48px;line-height:1.05;margin:0;font-weight:800;letter-spacing:-.01em}
+  #share p{margin:0;opacity:.8}
+  #qr{background:#fff;padding:18px;border-radius:16px;box-shadow:inset 0 0 0 2px var(--line)}
+  #qr img,#qr canvas{display:block}
+
+  #error{align-items:center;justify-content:center;text-align:center;padding:40px;background:var(--bg)}
+  #error p{max-width:640px;font-size:30px}
+  #pending{position:fixed;top:16px;right:20px;font-size:15px;padding:6px 12px;border-radius:20px;
+    background:var(--pill);color:var(--fg);display:none}
+  #pending.on{display:block}
+
+  @media (prefers-reduced-motion:reduce){#count.tick,#flash.go{animation:none}.spin{animation-duration:3s}}
+</style>
+</head>
+<body>
+<video id="video" autoplay playsinline muted></video>
+
+<section class="screen" id="attract">
+  <div class="panel">
+    <p class="name" id="eventName"></p>
+    <p class="cta">Pick your <span>shot</span></p>
+    <div class="modes" id="modes"></div>
+  </div>
+</section>
+
+<section class="screen" id="layout">
+  <h2>Choose a layout</h2>
+  <div class="layouts">
+    <button class="lay" data-layout="grid"><div class="mini grid"><i></i><i></i><i></i><i></i></div><b>Grid</b><small>Four in a square</small></button>
+    <button class="lay" data-layout="strip"><div class="mini strip"><i></i><i></i><i></i><i></i></div><b>Strip</b><small>Classic photo strip</small></button>
+  </div>
+  <button class="btn quiet" id="layoutBack">Back</button>
+</section>
+
+<section class="screen" id="countdown">
+  <p id="cdLabel" hidden></p>
+  <div id="count" aria-live="assertive"></div>
+</section>
+
+<section class="screen" id="processing"><div class="spin" aria-hidden="true"></div><p>Making your boomerang…</p></section>
+
+<section class="screen" id="review">
+  <div class="media" id="reviewMedia"></div>
+  <div class="row">
+    <button class="btn quiet" id="retake">Retake</button>
+    <button class="btn primary" id="keep">Get my photo</button>
+  </div>
+</section>
+
+<section class="screen" id="share">
+  <div class="media" id="shareMedia"></div>
+  <div class="side">
+    <h2>Scan to get your photo</h2>
+    <div id="qr"></div>
+    <p>Point your phone camera at the code and open the link.</p>
+    <button class="btn primary" id="done">Done</button>
+  </div>
+</section>
+
+<section class="screen" id="error"><p id="errorText"></p></section>
+<div id="flash"></div>
+<div id="pending"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $('video');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const even = n => Math.round(n / 2) * 2;
+const INK = '#10233F', PAPER = '#FFF8EE';
+const THEME = CONFIG.THEME === 'dark'
+  ? { bg: INK, fg: PAPER, band: '16,35,63' }
+  : { bg: PAPER, fg: INK, band: '255,248,238' };
+const MP4_TYPES = ['video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/mp4'];
+const MODE_LABELS = {
+  photo: ['Photo', 'One shot'],
+  collage: ['Collage', 'Four shots'],
+  boomerang: ['Boomerang', 'Loops back and forth']
+};
+
+document.documentElement.style.setProperty('--accent', CONFIG.ACCENT);
+document.documentElement.dataset.theme = CONFIG.THEME === 'dark' ? 'dark' : 'light';
+$('eventName').textContent = CONFIG.EVENT_NAME;
+
+let stream = null, timer = null, logoImg = null, FONT = 'sans-serif';
+let frameImgs = {}, current = null, result = null, busy = false, errorAction = null;
+
+/* ---------- Screens ---------- */
+function show(id){ document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+function clearTimer(){ clearTimeout(timer); clearInterval(timer); timer = null; }
+function home(){
+  clearTimer();
+  $('reviewMedia').innerHTML = ''; $('shareMedia').innerHTML = '';
+  show('attract');
+}
+function showError(msg, action){ errorAction = action; $('errorText').textContent = msg; show('error'); }
+$('error').onclick = () => errorAction && errorAction();
+
+/* ---------- Camera ---------- */
+async function startCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:1920}, height:{ideal:1080}, facingMode:'user' }, audio:false });
+    video.srcObject = stream;
+    await video.play();
+    home();
+  }catch(e){
+    stream = null;
+    showError('The camera isn\'t available (' + e.name + '). Tap to try again.', startCamera);
+  }
+}
+
+/* ---------- Mode picker ---------- */
+$('modes').innerHTML = CONFIG.MODES.filter(m => MODE_LABELS[m]).map(m =>
+  `<button class="mode" data-mode="${m}"><b>${MODE_LABELS[m][0]}</b><small>${MODE_LABELS[m][1]}</small></button>`).join('');
+
+$('modes').onclick = e => {
+  const b = e.target.closest('.mode');
+  if (!b || busy) return;
+  if (!stream) return startCamera();
+  const mode = b.dataset.mode;
+  if (mode === 'collage'){
+    const layouts = CONFIG.COLLAGE_LAYOUTS;
+    if (layouts.length === 1) return run('collage', layouts[0]);
+    document.querySelectorAll('.lay').forEach(l => l.style.display = layouts.includes(l.dataset.layout) ? '' : 'none');
+    show('layout');
+    clearTimer(); timer = setTimeout(home, 30000);
+    return;
+  }
+  run(mode);
+};
+document.querySelectorAll('.lay').forEach(l => l.onclick = () => run('collage', l.dataset.layout));
+$('layoutBack').onclick = home;
+
+/* ---------- Capture helpers ---------- */
+function mk(w, h){ const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+function grab(w, h){
+  w = w || video.videoWidth; h = h || video.videoHeight;
+  const c = mk(w, h);
+  c.getContext('2d').drawImage(video, 0, 0, w, h);   // saved un-mirrored so text in the scene reads correctly
+  return c;
+}
+
+function flash(){ const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+
+function countdown(n, label){
+  return new Promise(res => {
+    show('countdown');
+    const lab = $('cdLabel'), el = $('count');
+    lab.classList.remove('rec');
+    lab.textContent = label; lab.hidden = !label;
+    const tick = () => {
+      if (n <= 0){ el.textContent = ''; return res(); }
+      el.textContent = n;
+      el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick');
+      n--;
+      setTimeout(tick, 1000);
+    };
+    tick();
+  });
+}
+
+/* ---------- Drawing ---------- */
+function coverDraw(g, src, x, y, w, h){
+  const s = Math.max(w / src.width, h / src.height);
+  const dw = src.width * s, dh = src.height * s;
+  g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+  g.drawImage(src, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  g.restore();
+}
+
+function drawBrand(g, x, y, w, h, align){
+  const lh = h * 0.6;
+  const lw = logoImg ? lh * (logoImg.width / logoImg.height) : 0;
+  const gap = logoImg ? h * 0.22 : 0;
+  const nameSize = Math.round(h * 0.34), lineSize = Math.round(h * 0.19);
+  g.font = `800 ${nameSize}px ${FONT}`;
+  const nw = g.measureText(CONFIG.EVENT_NAME).width;
+  g.font = `500 ${lineSize}px ${FONT}`;
+  const lnw = CONFIG.EVENT_LINE ? g.measureText(CONFIG.EVENT_LINE).width : 0;
+  const total = lw + gap + Math.max(nw, lnw);
+  const sx = align === 'center' ? x + (w - total) / 2 : x + h * 0.3;
+  if (logoImg) g.drawImage(logoImg, sx, y + (h - lh) / 2, lw, lh);
+  const tx = sx + lw + gap;
+  g.fillStyle = THEME.fg; g.textBaseline = 'middle';
+  g.font = `800 ${nameSize}px ${FONT}`;
+  g.fillText(CONFIG.EVENT_NAME, tx, CONFIG.EVENT_LINE ? y + h * 0.4 : y + h / 2);
+  if (CONFIG.EVENT_LINE){
+    g.font = `500 ${lineSize}px ${FONT}`;
+    g.globalAlpha = .85; g.fillText(CONFIG.EVENT_LINE, tx, y + h * 0.72); g.globalAlpha = 1;
+  }
+}
+
+/* Single photo and every boomerang frame: photo + frame PNG, or a bottom band */
+function renderSingle(g, src){
+  const W = g.canvas.width, H = g.canvas.height;
+  g.drawImage(src, 0, 0, W, H);
+  if (frameImgs.photo){ g.drawImage(frameImgs.photo, 0, 0, W, H); return; }
+  const band = H * 0.15;
+  const grad = g.createLinearGradient(0, H - band * 1.6, 0, H);
+  grad.addColorStop(0, `rgba(${THEME.band},0)`);
+  grad.addColorStop(1, `rgba(${THEME.band},.9)`);
+  g.fillStyle = grad;
+  g.fillRect(0, H - band * 1.6, W, band * 1.6);
+  drawBrand(g, 0, H - band, W, band, 'left');
+}
+
+function composePhoto(src){
+  const c = mk(src.width, src.height);
+  renderSingle(c.getContext('2d'), src);
+  return c;
+}
+
+/* Grid: 1920x1280, four 16:9 cells, name band along the bottom */
+function composeGrid(shots){
+  const W = 1920, m = 24, cw = (W - 3 * m) / 2, ch = Math.round(cw * 9 / 16), band = 168;
+  const H = 2 * ch + 3 * m + band;   // 1280
+  const c = mk(W, H), g = c.getContext('2d');
+  g.fillStyle = THEME.bg; g.fillRect(0, 0, W, H);
+  shots.forEach((s, i) => coverDraw(g, s, m + (i % 2) * (cw + m), m + Math.floor(i / 2) * (ch + m), cw, ch));
+  if (frameImgs.grid) g.drawImage(frameImgs.grid, 0, 0, W, H);
+  else drawBrand(g, 0, H - band, W, band, 'center');
+  return c;
+}
+
+/* Strip: 1080x2700, four 16:9 cells stacked, name band along the bottom */
+function composeStrip(shots){
+  const W = 1080, m = 36, cw = W - 2 * m, ch = Math.round(cw * 9 / 16), band = 252;
+  const H = 4 * ch + 5 * m + band;   // 2700
+  const c = mk(W, H), g = c.getContext('2d');
+  g.fillStyle = THEME.bg; g.fillRect(0, 0, W, H);
+  shots.forEach((s, i) => coverDraw(g, s, m, m + i * (ch + m), cw, ch));
+  if (frameImgs.strip) g.drawImage(frameImgs.strip, 0, 0, W, H);
+  else drawBrand(g, 0, H - band, W, band, 'center');
+  return c;
+}
+
+const toJpeg = c => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/jpeg', 0.9));
+
+/* ---------- Boomerang ---------- */
+async function recordBoomerang(){
+  const B = CONFIG.BOOMERANG;
+  show('countdown');
+  $('count').textContent = '';
+  const lab = $('cdLabel');
+  lab.hidden = false; lab.classList.add('rec'); lab.textContent = '● Keep moving!';
+  const w = even(B.width), h = even(w * video.videoHeight / video.videoWidth);
+  const frames = [];
+  for (let i = 0; i < B.frames; i++){ frames.push(grab(w, h)); await sleep(B.intervalMs); }
+  lab.classList.remove('rec');
+  return frames.concat(frames.slice(1, -1).reverse());   // forward, then back
+}
+
+async function encodeMp4(seq, mime){
+  const B = CONFIG.BOOMERANG;
+  const c = mk(seq[0].width, seq[0].height), g = c.getContext('2d');
+  renderSingle(g, seq[0]);
+  const s = c.captureStream(B.fps);
+  const rec = new MediaRecorder(s, { mimeType: mime, videoBitsPerSecond: 2500000 });
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(r => rec.onstop = r);
+  rec.start();
+  for (let l = 0; l < B.loops; l++){
+    for (const f of seq){ renderSingle(g, f); await sleep(1000 / B.fps); }
+  }
+  rec.stop(); await stopped;
+  s.getTracks().forEach(t => t.stop());
+  const blob = new Blob(chunks, { type: 'video/mp4' });
+  if (!blob.size) throw new Error('empty recording');
+  return blob;
+}
+
+async function encodeGif(seq){
+  const B = CONFIG.BOOMERANG;
+  const { GIFEncoder, quantize, applyPalette } = await import('https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js');
+  const w = even(B.gifWidth), h = even(w * seq[0].height / seq[0].width);
+  const c = mk(w, h), g = c.getContext('2d', { willReadFrequently: true });
+  const gif = GIFEncoder();
+  for (const f of seq){
+    renderSingle(g, f);
+    const { data } = g.getImageData(0, 0, w, h);
+    const palette = quantize(data, 256);
+    gif.writeFrame(applyPalette(data, palette), w, h, { palette, delay: Math.round(1000 / B.fps) });
+    await sleep(0);   // keep the spinner moving
+  }
+  gif.finish();
+  return new Blob([gif.bytes()], { type: 'image/gif' });
+}
+
+async function encodeBoomerang(seq){
+  const fmt = CONFIG.BOOMERANG.format;
+  const canMp4 = fmt !== 'gif' && window.MediaRecorder && HTMLCanvasElement.prototype.captureStream;
+  const mime = canMp4 ? MP4_TYPES.find(t => MediaRecorder.isTypeSupported(t)) : null;
+  if (mime){
+    try { return await encodeMp4(seq, mime); }
+    catch (e){ console.warn('MP4 failed, falling back to GIF', e); }
+  }
+  return encodeGif(seq);
+}
+
+/* ---------- Run a session ---------- */
+async function run(mode, layout){
+  if (busy) return;
+  busy = true; clearTimer();
+  current = { mode, layout };
+  try{
+    let blob;
+    if (mode === 'photo'){
+      await countdown(CONFIG.COUNTDOWN, '');
+      const shot = grab(); flash();
+      blob = await toJpeg(composePhoto(shot));
+    } else if (mode === 'collage'){
+      const shots = [];
+      for (let k = 0; k < 4; k++){
+        await countdown(k ? CONFIG.COLLAGE_GAP_SECONDS : CONFIG.COUNTDOWN, `Photo ${k + 1} of 4`);
+        shots.push(grab()); flash();
+        await sleep(350);
+      }
+      blob = await toJpeg(layout === 'strip' ? composeStrip(shots) : composeGrid(shots));
+    } else {
+      await countdown(CONFIG.COUNTDOWN, 'Boomerang');
+      const seq = await recordBoomerang();
+      show('processing');
+      blob = await encodeBoomerang(seq);
+    }
+    if (result) URL.revokeObjectURL(result.url);
+    result = { blob, mime: blob.type, url: URL.createObjectURL(blob) };
+    review();
+  }catch(e){
+    console.error(e);
+    showError('Something went wrong. Tap to start over.', home);
+  }finally{
+    busy = false;
+  }
+}
+
+function setMedia(box, r){
+  box.innerHTML = '';
+  let el;
+  if (r.mime.startsWith('video/')){
+    el = document.createElement('video');
+    el.muted = true; el.loop = true; el.autoplay = true; el.setAttribute('playsinline', '');
+  } else {
+    el = document.createElement('img');
+    el.alt = 'Your photo';
+  }
+  el.src = r.url;
+  box.appendChild(el);
+  if (el.play) el.play().catch(() => {});
+}
+
+function review(){
+  setMedia($('reviewMedia'), result);
+  show('review');
+  let left = CONFIG.REVIEW_SECONDS;
+  const keep = $('keep');
+  keep.textContent = `Get my photo (${left})`;
+  timer = setInterval(() => {
+    left--;
+    keep.textContent = `Get my photo (${left})`;
+    if (left <= 0) accept();
+  }, 1000);
+}
+
+$('retake').onclick = () => { clearTimer(); run(current.mode, current.layout); };
+$('keep').onclick = accept;
+$('done').onclick = home;
+
+async function accept(){
+  clearTimer();
+  const id = makeId();
+  const data = await blobToB64(result.blob);
+  await queue.put({ id, data, mime: result.mime, at: Date.now() });
+  processQueue();
+
+  setMedia($('shareMedia'), result);
+  const qr = $('qr');
+  qr.innerHTML = '';
+  new QRCode(qr, { text: CONFIG.UPLOAD_URL + '?id=' + id, width: 300, height: 300,
+                   correctLevel: QRCode.CorrectLevel.M });
+  show('share');
+  timer = setTimeout(home, CONFIG.QR_SECONDS * 1000);
+}
+
+function blobToB64(b){
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
+}
+
+function makeId(){
+  const b = new Uint8Array(12);
+  crypto.getRandomValues(b);
+  const rand = btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  return Date.now().toString(36) + '-' + rand;
+}
+
+/* ---------- Upload queue (survives slow Wi-Fi and page reloads) ---------- */
+const queue = (() => {
+  const mem = new Map();
+  let dbp;
+  try{
+    dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('booth', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('q', { keyPath: 'id' });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    dbp.catch(() => {});
+  }catch(e){ dbp = Promise.reject(e); dbp.catch(() => {}); }
+
+  const tx = async (mode, fn) => {
+    const db = await dbp;
+    return new Promise((res, rej) => {
+      const t = db.transaction('q', mode);
+      const req = fn(t.objectStore('q'));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    async put(item){ mem.set(item.id, item); try{ await tx('readwrite', s => s.put(item)); }catch(e){} },
+    async del(id){ mem.delete(id); try{ await tx('readwrite', s => s.delete(id)); }catch(e){} },
+    async all(){
+      try{ (await tx('readonly', s => s.getAll()) || []).forEach(i => mem.set(i.id, i)); }catch(e){}
+      return [...mem.values()].sort((a, b) => a.at - b.at);
+    }
+  };
+})();
+
+let uploading = false;
+async function processQueue(){
+  if (uploading) return;
+  uploading = true;
+  try{
+    for (const item of await queue.all()){
+      const r = await fetch(CONFIG.UPLOAD_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
+        body: JSON.stringify({ key: CONFIG.UPLOAD_KEY, id: item.id,
+                               mime: item.mime || 'image/jpeg', image: item.data || item.image })
+      });
+      const res = await r.json();
+      if (res.ok) await queue.del(item.id);
+      else { console.warn('Upload rejected', res.error); break; }
+    }
+  }catch(e){
+    console.warn('Upload failed, will retry', e);
+  }finally{
+    uploading = false;
+    updatePending();
+  }
+}
+async function updatePending(){
+  const n = (await queue.all()).length;
+  const el = $('pending');
+  el.textContent = n === 1 ? '1 photo waiting to upload' : `${n} photos waiting to upload`;
+  el.classList.toggle('on', n > 0);
+}
+setInterval(processQueue, 10000);
+window.addEventListener('online', processQueue);
+
+/* ---------- Start ---------- */
+function loadImage(src){
+  return new Promise(res => {
+    if (!src) return res(null);
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => res(null);
+    i.src = src;
+  });
+}
+
+(async () => {
+  const F = CONFIG.FRAMES || {};
+  const [logo, fp, fg, fs] = await Promise.all([
+    loadImage(CONFIG.LOGO_URL), loadImage(F.photo), loadImage(F.grid), loadImage(F.strip)]);
+  logoImg = logo; frameImgs = { photo: fp, grid: fg, strip: fs };
+  try{ await document.fonts.load('800 40px "Bricolage Grotesque"'); }catch(e){}
+  FONT = getComputedStyle(document.body).fontFamily;
+  await startCamera();
+  processQueue();
+})();
+</script>
+</body>
+</html>

@@ -9,36 +9,52 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
-/* ======================= EVENT SETTINGS ======================= */
+/* ======================= BOOTH SETTINGS =======================
+   Only UPLOAD_URL and UPLOAD_KEY are needed here. Everything else is set per event
+   on the admin page (?page=admin) and loaded automatically; the values below are
+   fallbacks used until the booth has loaded the event's settings once.
+   ============================================================== */
 const CONFIG = {
-  UPLOAD_URL: 'https://script.google.com/macros/s/AKfycbxilYy4WQt-_xy1vy72uMppXL_y0_j-gtZR-1GfbwLkxEM8sat0qrdnabjgERoVsOQp9A/exec', // ends in /exec
-  UPLOAD_KEY: '3f8a2c71-9b4e-4d0a-a6c2-7e1f5b9d8c34',  // same as in Code.gs
-  EVENT_NAME: 'Happy Birthday Izza',
+  UPLOAD_URL: 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE', // ends in /exec
+  UPLOAD_KEY: 'CHANGE-ME-to-a-long-random-string',  // same as in Code.gs
+  EVENT_NAME: 'Our Event',
   EVENT_LINE: 'October 2026',      // smaller line under the name; '' to hide
   LOGO_URL: 'logo.png',            // must be on the same site as this page; '' to hide
   ACCENT: '#FF6F59',
   THEME: 'light',                  // 'light' or 'dark' — screens and the photo branding
 
-  MODES: ['photo', 'collage', 'boomerang'],  // remove any you don't want at this event
-  COLLAGE_LAYOUTS: ['grid', 'strip'],        // one entry = no layout question
+  MODES: ['photo', 'collage', 'boomerang', 'guestbook'],  // remove any you don't want
+  COLLAGE_LAYOUTS: ['grid', 'strip'],                     // one entry = no layout question
 
   // Optional transparent PNG frames, on the same site. '' = default name band.
   // Sizes: photo and boomerang 1920x1080, grid 1920x1280, strip 1080x2700
   FRAMES: { photo: '', grid: '', strip: '' },
+  LIVE_FRAME: true,                // show the photo frame over the camera while guests pose
+  MIRROR_PHOTOS: false,            // true = saved photos match the mirrored preview exactly
+
+  FILTERS: ['normal', 'bw', 'vintage', 'warm', 'pop'],    // [] hides the filter choice
+  STICKERS: true,                  // guests can add stickers to photos and collages
+  CUSTOM_STICKERS: [],             // extra PNG/SVG files on the same site, e.g. ['monogram.png']
+
+  ANIMATED_COLLAGE: true,          // collages also get a GIF that flips through the 4 shots
+  ANIMATED_DELAY_MS: 600,          // time on each shot in that GIF
+
+  GUESTBOOK: {
+    prompt: 'Leave a message for the couple!',
+    seconds: 15,                   // longest message
+    reviewSeconds: 30              // auto-save after this on the review screen
+  },
 
   COUNTDOWN: 3,                    // seconds before the first shot
   COLLAGE_GAP_SECONDS: 2,          // seconds between collage shots
-  REVIEW_SECONDS: 10,              // auto-continue on the review screen
+  REVIEW_SECONDS: 10,              // auto-continue on the review screen (resets while adding stickers)
   QR_SECONDS: 45,                  // back to start after this
 
   BOOMERANG: {
     format: 'auto',                // 'auto' = MP4 if the device can, else GIF; or 'mp4' / 'gif'
-    frames: 20,                    // frames captured
-    intervalMs: 65,                // gap between captured frames (20 x 65ms = 1.3s of motion)
-    fps: 25,                       // playback speed
-    loops: 3,                      // MP4 only: back-and-forth repeats in the video (GIFs loop forever)
-    width: 720,                    // MP4 width in pixels
-    gifWidth: 480                  // GIF width in pixels (smaller keeps files light)
+    frames: 20, intervalMs: 65,    // 20 x 65ms = 1.3s of motion
+    fps: 25, loops: 3,             // playback speed; MP4 back-and-forth repeats
+    width: 720, gifWidth: 480
   }
 };
 /* ============================================================== */
@@ -46,7 +62,6 @@ const CONFIG = {
 <style>
   :root{ --ink:#10233F; --paper:#FFF8EE; --accent:#FF6F59;
     --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
-    /* dark theme (default) */
     --bg:#10233F; --fg:#FFF8EE;
     --scrim:16,35,63; --card:rgba(255,248,238,.1); --line:rgba(255,248,238,.28);
     --pill:rgba(16,35,63,.75); --mini-bg:#0A1830; --mini-cell:rgba(255,248,238,.4);
@@ -59,7 +74,9 @@ const CONFIG = {
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
     font:20px/1.4 var(--display);user-select:none;-webkit-user-select:none;touch-action:manipulation}
-  video#video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  #video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  #liveFrame{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;display:none}
+  #liveFrame.on{display:block}
   .screen{position:fixed;inset:0;display:none}
   .screen.on{display:flex}
   button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
@@ -67,24 +84,40 @@ const CONFIG = {
   .btn{padding:22px 44px;border-radius:16px;font-size:26px;font-weight:800}
   .btn.primary{background:var(--accent);color:#fff}
   .btn.quiet{color:var(--fg);box-shadow:inset 0 0 0 3px var(--line)}
+  .solid{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:28px;text-align:center;padding:40px}
+  .solid h2{font-size:52px;margin:0;font-weight:800;letter-spacing:-.01em;max-width:1100px;line-height:1.1}
+  .solid p{margin:0;font-size:24px;opacity:.8;max-width:900px}
+  .row{display:flex;gap:20px}
 
-  /* Start: mode picker over the live camera */
-  #attract{align-items:flex-end;padding:48px 56px;
-    background:linear-gradient(to top,rgba(var(--scrim),.94) 0%,rgba(var(--scrim),.65) 38%,rgba(var(--scrim),0) 70%)}
-  #attract .panel{width:100%}
-  #attract .name{font-size:26px;font-weight:500;opacity:.85;margin:0}
-  #attract .cta{font-size:58px;font-weight:800;line-height:1.05;margin:4px 0 24px;letter-spacing:-.02em}
-  #attract .cta span{color:var(--accent)}
-  .modes{display:flex;gap:18px}
-  .mode{flex:1;text-align:left;padding:22px 26px;border-radius:20px;background:var(--card);
-    box-shadow:inset 0 0 0 2px var(--line)}
+  /* Start */
+  #attract{align-items:flex-end}
+  #attract .panel{width:100%;display:flex;align-items:center;justify-content:space-between;gap:32px;
+    padding:14px 40px;background:rgba(var(--scrim),.92);box-shadow:0 -8px 30px rgba(0,0,0,.12)}
+  #attract .evt{min-width:0}
+  #attract .name{font-size:34px;font-weight:800;line-height:1.1;margin:0;letter-spacing:-.01em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #attract .cta{font-size:20px;font-weight:500;margin:4px 0 0;opacity:.75}
+  #attract .cta span{color:var(--accent);font-weight:800}
+  .filters{position:absolute;top:20px;right:24px;display:flex;flex-direction:column;align-items:center;gap:var(--fgap,12px);
+    padding:12px 10px;border-radius:22px;background:var(--pill);box-shadow:0 10px 30px rgba(0,0,0,.18)}
+  .filters .lbl{font-size:15px;font-weight:800;opacity:.7}
+  .chip{display:flex;flex-direction:column;align-items:center;gap:3px;padding:0;font-size:var(--flabel,15px);font-weight:500}
+  .chip .sw{width:calc(var(--swh,69px) * 4 / 3);height:var(--swh,69px);border-radius:8px;display:block;background:#8E9BAA;
+    border:4px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.22)}
+  .chip.on .sw{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent),0 4px 12px rgba(0,0,0,.22)}
+  .chip.on span{color:var(--accent);font-weight:800}
+  .modes{display:flex;gap:14px;justify-content:flex-end;flex:none}
+  .mode{flex:none;width:128px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px 8px;
+    border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 2px var(--line)}
   .mode:active{background:var(--accent);color:#fff;box-shadow:none}
-  .mode b{display:block;font-size:36px;font-weight:800;line-height:1.1}
-  .mode small{font-size:19px;opacity:.75}
+  .mode .mi{width:72px;height:72px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+    background:rgba(255,111,89,.14);background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent)}
+  .mode .mi svg{width:44px;height:44px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .mode:active .mi{background:rgba(255,255,255,.2);color:#fff}
+  .mode .nm{font-size:15px;font-weight:600;line-height:1.1;text-align:center;opacity:.85}
+  .mode:active{background:var(--accent);color:#fff;box-shadow:none}
 
   /* Collage layout picker */
-  #layout{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:32px}
-  #layout h2{font-size:48px;margin:0;font-weight:800}
   .layouts{display:flex;gap:28px}
   .lay{display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px 40px;border-radius:22px;
     background:var(--card);box-shadow:inset 0 0 0 2px var(--line);min-width:280px}
@@ -96,76 +129,146 @@ const CONFIG = {
   .mini.grid{grid-template-columns:1fr 1fr;aspect-ratio:3/2}
   .mini.strip{grid-template-rows:repeat(4,1fr);width:76px}
 
-  /* Countdown / recording (over the live camera, so the number stays white) */
-  #countdown{flex-direction:column;align-items:center;justify-content:center}
-  #cdLabel{font-size:30px;font-weight:800;padding:10px 26px;border-radius:40px;background:var(--pill);color:var(--fg);margin:0}
-  #cdLabel.rec{background:#D93A3A;color:#fff}
+  /* Countdown and recording (over the live camera) */
+  #countdown,#recording{flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  #recording{justify-content:space-between;padding:40px}
+  .pill{font-size:30px;font-weight:800;padding:10px 26px;border-radius:40px;background:var(--pill);color:var(--fg);margin:0}
+  .pill.rec{background:#D93A3A;color:#fff}
   #count{font-size:min(44vh,400px);font-weight:800;line-height:1;color:#fff;text-shadow:0 10px 60px rgba(0,0,0,.45);min-height:1em}
   #count.tick{animation:tick .9s ease-out}
   @keyframes tick{from{transform:scale(1.35);opacity:0}25%{opacity:1}to{transform:scale(1)}}
   #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
   #flash.go{animation:flash .5s ease-out}
   @keyframes flash{from{opacity:1}to{opacity:0}}
+  #recMic{font-size:20px}
 
-  /* Processing */
-  #processing{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:22px}
-  .spin{width:72px;height:72px;border-radius:50%;border:6px solid var(--spin-track);border-top-color:var(--accent);
-    animation:spin 1s linear infinite}
+  .spin{width:72px;height:72px;border-radius:50%;border:6px solid var(--spin-track);border-top-color:var(--accent);animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  #processing p{font-size:32px;font-weight:800;margin:0}
 
-  /* Review + share */
-  #review,#share{background:var(--bg);align-items:center;justify-content:center;padding:36px}
-  #review{flex-direction:column;gap:26px}
-  #share{gap:48px}
+  /* Review */
+  #review{background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:28px}
+  .rv-main{display:flex;align-items:center;gap:32px}
   .media img,.media video{display:block;border-radius:14px;box-shadow:var(--shadow)}
-  #reviewMedia img,#reviewMedia video{max-width:88vw;max-height:70vh}
+  #reviewMedia img,#reviewMedia video{max-width:88vw;max-height:72vh}
+  #review.stickers #reviewMedia img{max-width:62vw;max-height:72vh}
+  .ed{position:relative;display:inline-block;touch-action:none}
+  .stk{position:absolute;left:50%;top:50%}
+  .stk img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none;box-shadow:none!important;border-radius:0!important;max-width:none!important;max-height:none!important}
+  .stk.sel{outline:3px dashed var(--accent);outline-offset:6px;border-radius:6px}
+  .stickerbar{width:300px;display:flex;flex-direction:column;gap:14px}
+  .stickerbar p{margin:0;font-size:22px;font-weight:800}
+  .tray{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tray button{aspect-ratio:1;border-radius:14px;background:var(--card);box-shadow:inset 0 0 0 2px var(--line);padding:12px;display:flex;align-items:center;justify-content:center}
+  .tray button:active{box-shadow:inset 0 0 0 3px var(--accent)}
+  .tray img{max-width:100%;max-height:100%}
+  .stkctl{display:flex;gap:10px}
+  .stkctl button{flex:1;padding:14px 0;border-radius:12px;font-size:22px;font-weight:800;box-shadow:inset 0 0 0 2px var(--line)}
+  .stkctl[hidden]{display:none}
+  .stickerbar small{font-size:17px;opacity:.7}
+
+  /* Share */
+  #share{background:var(--bg);align-items:center;justify-content:center;gap:48px;padding:36px}
   #shareMedia img,#shareMedia video{max-width:46vw;max-height:78vh}
-  .row{display:flex;gap:20px}
   #share .side{display:flex;flex-direction:column;align-items:flex-start;gap:20px;max-width:420px}
   #share h2{font-size:48px;line-height:1.05;margin:0;font-weight:800;letter-spacing:-.01em}
   #share p{margin:0;opacity:.8}
   #qr{background:#fff;padding:18px;border-radius:16px;box-shadow:inset 0 0 0 2px var(--line)}
   #qr img,#qr canvas{display:block}
 
-  #error{align-items:center;justify-content:center;text-align:center;padding:40px;background:var(--bg)}
-  #error p{max-width:640px;font-size:30px}
   #pending{position:fixed;top:16px;right:20px;max-width:70vw;font-size:15px;padding:6px 12px;border-radius:20px;
     background:var(--pill);color:var(--fg);display:none}
   #pending.on{display:block}
+
+  .filters[hidden]{display:none}
+
+  /* Operator menu */
+  #opHot{position:fixed;top:0;left:0;width:110px;height:110px;z-index:50}
+  .pindots{display:flex;gap:16px;min-height:28px}
+  .pindots i{width:22px;height:22px;border-radius:50%;background:var(--accent)}
+  .pinpad{display:grid;grid-template-columns:repeat(3,110px);gap:14px}
+  .pinpad button{height:90px;border-radius:18px;font-size:38px;font-weight:800;background:var(--card);box-shadow:inset 0 0 0 2px var(--line)}
+  .pinpad button:active{background:var(--accent);color:#fff}
+  #opMenu{justify-content:flex-start;padding-top:56px}
+  .opgrid{display:grid;grid-template-columns:1.2fr 1fr;gap:28px;width:min(1200px,92vw);text-align:left}
+  .opstat{background:var(--card);box-shadow:inset 0 0 0 2px var(--line);border-radius:20px;padding:22px 26px;font-size:22px}
+  .opstat div{display:flex;justify-content:space-between;gap:20px;padding:8px 0;border-top:1px solid var(--line)}
+  .opstat div:first-child{border-top:0}
+  .opstat span:first-child{opacity:.7}
+  .opstat .bad{color:#D93A3A;font-weight:800}
+  .opstat .good{color:#1E8E5A;font-weight:800}
+  .opbtns{display:flex;flex-direction:column;gap:14px}
+  .opbtns .btn{padding:18px 24px;font-size:24px;text-align:left}
+  #opEvents{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:1200px}
+  #opEvents[hidden]{display:none}
+  #opEvents button{padding:16px 24px;border-radius:14px;font-size:22px;font-weight:800;background:var(--card);box-shadow:inset 0 0 0 2px var(--line)}
+  #opEvents button.cur{box-shadow:inset 0 0 0 3px var(--accent)}
+  #opMsg{min-height:1.4em;font-size:22px}
 
   @media (prefers-reduced-motion:reduce){#count.tick,#flash.go{animation:none}.spin{animation-duration:3s}}
 </style>
 </head>
 <body>
 <video id="video" autoplay playsinline muted></video>
+<img id="liveFrame" alt="">
 
 <section class="screen" id="attract">
   <div class="panel">
-    <p class="name" id="eventName"></p>
-    <p class="cta">Pick your <span>shot</span></p>
+    <div class="evt">
+      <p class="name" id="eventName"></p>
+      <p class="cta">Pick your <span>shot</span></p>
+    </div>
     <div class="modes" id="modes"></div>
   </div>
+  <div class="filters" id="filters"></div>
 </section>
 
-<section class="screen" id="layout">
+<section class="screen solid" id="layout">
   <h2>Choose a layout</h2>
   <div class="layouts">
     <button class="lay" data-layout="grid"><div class="mini grid"><i></i><i></i><i></i><i></i></div><b>Grid</b><small>Four in a square</small></button>
     <button class="lay" data-layout="strip"><div class="mini strip"><i></i><i></i><i></i><i></i></div><b>Strip</b><small>Classic photo strip</small></button>
   </div>
-  <button class="btn quiet" id="layoutBack">Back</button>
+  <button class="btn quiet" data-home>Back</button>
+</section>
+
+<section class="screen solid" id="gbIntro">
+  <h2 id="gbPrompt"></h2>
+  <p id="gbInfo"></p>
+  <div class="row">
+    <button class="btn quiet" data-home>Back</button>
+    <button class="btn primary" id="gbStart">Start recording</button>
+  </div>
 </section>
 
 <section class="screen" id="countdown">
-  <p id="cdLabel" hidden></p>
+  <p class="pill" id="cdLabel" hidden></p>
   <div id="count" aria-live="assertive"></div>
 </section>
 
-<section class="screen" id="processing"><div class="spin" aria-hidden="true"></div><p>Making your boomerang…</p></section>
+<section class="screen" id="recording">
+  <p class="pill rec" id="recTime"></p>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+    <p class="pill" id="recMic" hidden>No microphone found — recording video only</p>
+    <button class="btn primary" id="recStop">Stop</button>
+  </div>
+</section>
+
+<section class="screen solid" id="processing"><div class="spin" aria-hidden="true"></div><p id="procText">Making your boomerang…</p></section>
 
 <section class="screen" id="review">
-  <div class="media" id="reviewMedia"></div>
+  <div class="rv-main">
+    <div class="media" id="reviewMedia"></div>
+    <div class="stickerbar" id="stickerbar" hidden>
+      <p>Add stickers</p>
+      <div class="tray" id="tray"></div>
+      <div class="stkctl" id="stkctl" hidden>
+        <button id="stkSmaller" aria-label="Smaller">−</button>
+        <button id="stkBigger" aria-label="Bigger">+</button>
+        <button id="stkRemove">Remove</button>
+      </div>
+      <small>Drag to move. Pinch to resize and turn.</small>
+    </div>
+  </div>
   <div class="row">
     <button class="btn quiet" id="retake">Retake</button>
     <button class="btn primary" id="keep">Get my photo</button>
@@ -178,11 +281,46 @@ const CONFIG = {
     <h2>Scan to get your photo</h2>
     <div id="qr"></div>
     <p>Point your phone camera at the code and open the link.</p>
-    <button class="btn primary" id="done">Done</button>
+    <button class="btn primary" data-home>Done</button>
   </div>
 </section>
 
-<section class="screen" id="error"><p id="errorText"></p></section>
+<section class="screen solid" id="thanks" data-home>
+  <h2>Thank you!</h2>
+  <p>Your message was saved for the hosts.</p>
+</section>
+
+<section class="screen solid" id="error"><p id="errorText"></p></section>
+<section class="screen solid" id="opPin">
+  <h2>Operator PIN</h2>
+  <div class="pindots" id="pinDots"></div>
+  <div class="pinpad" id="pinPad">
+    <button>1</button><button>2</button><button>3</button>
+    <button>4</button><button>5</button><button>6</button>
+    <button>7</button><button>8</button><button>9</button>
+    <button data-k="clear" aria-label="Clear">C</button><button>0</button><button data-k="ok">OK</button>
+  </div>
+  <p id="pinMsg"></p>
+  <button class="btn quiet" id="pinCancel">Cancel</button>
+</section>
+
+<section class="screen solid" id="opMenu">
+  <h2>Operator menu</h2>
+  <div class="opgrid">
+    <div class="opstat" id="opStatus"></div>
+    <div class="opbtns">
+      <button class="btn primary" id="opRetry">Retry uploads now</button>
+      <button class="btn quiet" id="opReload">Reload event settings</button>
+      <button class="btn quiet" id="opSwitch">Switch event</button>
+      <button class="btn quiet" id="opRestart">Restart booth</button>
+      <button class="btn quiet" id="opClose">Back to booth</button>
+    </div>
+  </div>
+  <div id="opEvents" hidden></div>
+  <p id="opMsg"></p>
+</section>
+
+<div id="opHot" aria-hidden="true"></div>
 <div id="flash"></div>
 <div id="pending"></div>
 
@@ -191,32 +329,77 @@ const $ = id => document.getElementById(id);
 const video = $('video');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const even = n => Math.round(n / 2) * 2;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const INK = '#10233F', PAPER = '#FFF8EE';
-const THEME = CONFIG.THEME === 'dark'
-  ? { bg: INK, fg: PAPER, band: '16,35,63' }
-  : { bg: PAPER, fg: INK, band: '255,248,238' };
+function themeFor(t){
+  return t === 'dark' ? { bg: INK, fg: PAPER, band: '16,35,63' } : { bg: PAPER, fg: INK, band: '255,248,238' };
+}
+let THEME = themeFor(CONFIG.THEME);
 const MP4_TYPES = ['video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/mp4'];
+const REC_TYPES = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+                   'video/webm;codecs=vp8,opus', 'video/webm'];
 const MODE_LABELS = {
   photo: ['Photo', 'One shot'],
   collage: ['Collage', 'Four shots'],
-  boomerang: ['Boomerang', 'Loops back and forth']
+  boomerang: ['Boomerang', 'Loops back and forth'],
+  guestbook: ['Video', 'Leave a greeting']
 };
+const MODE_ICONS = {
+  photo: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
+  collage: '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.5"/>',
+  boomerang: '<path d="M12 12c-2-2.6-3.7-4-5.5-4a4 4 0 0 0 0 8c1.8 0 3.5-1.4 5.5-4zm0 0c2 2.6 3.7 4 5.5 4a4 4 0 0 0 0-8c-1.8 0-3.5 1.4-5.5 4z"/>',
+  guestbook: '<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="M15.5 10.5 21 7.5v9l-5.5-3z"/><circle cx="7" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
+};
+const FILTER_DEFS = {
+  normal: ['Normal', 'none'],
+  bw: ['B&W', 'grayscale(1) contrast(1.15)'],
+  vintage: ['Vintage', 'sepia(.45) contrast(1.05) saturate(.85) brightness(1.03)'],
+  warm: ['Warm', 'saturate(1.2) sepia(.15) brightness(1.04)'],
+  pop: ['Pop', 'saturate(1.5) contrast(1.12)']
+};
+const canFilter = 'filter' in CanvasRenderingContext2D.prototype;
 
-document.documentElement.style.setProperty('--accent', CONFIG.ACCENT);
-document.documentElement.dataset.theme = CONFIG.THEME === 'dark' ? 'dark' : 'light';
-$('eventName').textContent = CONFIG.EVENT_NAME;
 
-let stream = null, timer = null, logoImg = null, FONT = 'sans-serif';
+let stream = null, micStream = null, timer = null, logoImg = null, FONT = 'sans-serif';
 let frameImgs = {}, current = null, result = null, busy = false, errorAction = null;
+let filterKey = 'normal', stickerImgs = [];
 
 /* ---------- Screens ---------- */
-function show(id){ document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+function show(id){
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+  const live = CONFIG.LIVE_FRAME && frameImgs.photo &&
+    (id === 'attract' || (id === 'countdown' && current && ['photo', 'boomerang'].includes(current.mode)));
+  $('liveFrame').classList.toggle('on', !!live);
+  if (id === 'attract') layoutFilters();
+}
+
+/* Size the filter thumbnails so the column always fits between the top of the screen and the bottom bar */
+function layoutFilters(){
+  const fe = $('filters');
+  if (!fe || fe.hidden) return;
+  const n = fe.querySelectorAll('.chip').length;
+  const bar = document.querySelector('#attract .panel').getBoundingClientRect().height;
+  if (!n || !bar) return;
+  const top = 20, gapAboveBar = 16, padding = 24, title = 22;
+  const avail = window.innerHeight - bar - top - gapAboveBar - padding - title;
+  const gap = avail / n < 70 ? 6 : 12;
+  const label = avail / n < 70 ? 13 : 18;
+  const sw = Math.max(26, Math.min(69, avail / n - label - gap - 3));
+  fe.style.setProperty('--swh', sw + 'px');
+  fe.style.setProperty('--fgap', gap + 'px');
+  fe.style.setProperty('--flabel', (label < 18 ? 11 : 15) + 'px');
+  fe.querySelector('.lbl').hidden = avail / n < 45;
+}
+window.addEventListener('resize', layoutFilters);
 function clearTimer(){ clearTimeout(timer); clearInterval(timer); timer = null; }
 function home(){
   clearTimer();
   $('reviewMedia').innerHTML = ''; $('shareMedia').innerHTML = '';
+  stickers = []; selected = null;
+  setFilter('normal');
   show('attract');
 }
+document.querySelectorAll('[data-home]').forEach(el => el.addEventListener('click', home));
 function showError(msg, action){ errorAction = action; $('errorText').textContent = msg; show('error'); }
 $('error').onclick = () => errorAction && errorAction();
 
@@ -234,9 +417,53 @@ async function startCamera(){
   }
 }
 
-/* ---------- Mode picker ---------- */
-$('modes').innerHTML = CONFIG.MODES.filter(m => MODE_LABELS[m]).map(m =>
-  `<button class="mode" data-mode="${m}"><b>${MODE_LABELS[m][0]}</b><small>${MODE_LABELS[m][1]}</small></button>`).join('');
+/* ---------- Start screen: filters and modes ---------- */
+function buildStart(){
+  document.documentElement.style.setProperty('--accent', CONFIG.ACCENT);
+  document.documentElement.dataset.theme = CONFIG.THEME === 'dark' ? 'dark' : 'light';
+  THEME = themeFor(CONFIG.THEME);
+  $('eventName').textContent = CONFIG.EVENT_NAME;
+  const keys = canFilter ? (CONFIG.FILTERS || []).filter(k => FILTER_DEFS[k]) : [];
+  const fe = $('filters');
+  fe.hidden = keys.length < 2;
+  fe.innerHTML = keys.length > 1 ? '<span class="lbl">Filter</span>' + keys.map(k =>
+    `<button class="chip" data-filter="${k}" aria-label="Filter: ${FILTER_DEFS[k][0]}"><canvas class="sw" width="168" height="126" aria-hidden="true"></canvas><span>${FILTER_DEFS[k][0]}</span></button>`).join('') : '';
+  drawSwatches();
+  if (!keys.includes(filterKey)) filterKey = 'normal';
+  setFilter(filterKey);
+  $('modes').innerHTML = (CONFIG.MODES || []).filter(m => MODE_LABELS[m]).map(m =>
+    `<button class="mode" data-mode="${m}" aria-label="${MODE_LABELS[m][0]}"><span class="mi" aria-hidden="true"><svg viewBox="0 0 24 24">${MODE_ICONS[m]}</svg></span>` +
+    `<span class="nm" aria-hidden="true">${MODE_LABELS[m][0]}</span></button>`).join('');
+}
+$('filters').onclick = e => { const b = e.target.closest('.chip'); if (b) setFilter(b.dataset.filter); };
+
+function drawSwatches(){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !$('attract').classList.contains('on')) return;
+  document.querySelectorAll('.chip').forEach(c => {
+    const cv = c.querySelector('canvas'); if (!cv) return;
+    const g = cv.getContext('2d');
+    // crop the middle of the camera to the thumbnail's shape, slightly zoomed in on the guests
+    const ar = cv.width / cv.height;
+    let sw = vw * 0.8, sh = sw / ar;
+    if (sh > vh * 0.9){ sh = vh * 0.9; sw = sh * ar; }
+    const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+    g.save();
+    g.filter = FILTER_DEFS[c.dataset.filter][1];
+    g.translate(cv.width, 0); g.scale(-1, 1);          // mirrored, like the preview
+    g.drawImage(video, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    g.restore();
+  });
+}
+setInterval(drawSwatches, 1500);
+video.addEventListener('playing', () => setTimeout(drawSwatches, 300));
+
+function setFilter(k){
+  if (!FILTER_DEFS[k]) k = 'normal';
+  filterKey = k;
+  video.style.filter = FILTER_DEFS[k][1];
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.filter === k));
+}
 
 $('modes').onclick = e => {
   const b = e.target.closest('.mode');
@@ -251,18 +478,27 @@ $('modes').onclick = e => {
     clearTimer(); timer = setTimeout(home, 30000);
     return;
   }
+  if (mode === 'guestbook'){
+    $('gbPrompt').textContent = CONFIG.GUESTBOOK.prompt;
+    $('gbInfo').textContent = `You'll have up to ${CONFIG.GUESTBOOK.seconds} seconds. Your message is saved for the hosts.`;
+    show('gbIntro');
+    clearTimer(); timer = setTimeout(home, 30000);
+    return;
+  }
   run(mode);
 };
 document.querySelectorAll('.lay').forEach(l => l.onclick = () => run('collage', l.dataset.layout));
-$('layoutBack').onclick = home;
+$('gbStart').onclick = runGuestbook;
 
 /* ---------- Capture helpers ---------- */
 function mk(w, h){ const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
 function grab(w, h){
   w = w || video.videoWidth; h = h || video.videoHeight;
-  const c = mk(w, h);
-  c.getContext('2d').drawImage(video, 0, 0, w, h);   // saved un-mirrored so text in the scene reads correctly
+  const c = mk(w, h), g = c.getContext('2d');
+  if (canFilter) g.filter = FILTER_DEFS[filterKey][1];
+  if (CONFIG.MIRROR_PHOTOS){ g.translate(w, 0); g.scale(-1, 1); }
+  g.drawImage(video, 0, 0, w, h);
   return c;
 }
 
@@ -316,7 +552,7 @@ function drawBrand(g, x, y, w, h, align){
   }
 }
 
-/* Single photo and every boomerang frame: photo + frame PNG, or a bottom band */
+/* One photo, a boomerang frame, or an animated-collage frame: frame PNG or bottom band */
 function renderSingle(g, src){
   const W = g.canvas.width, H = g.canvas.height;
   g.drawImage(src, 0, 0, W, H);
@@ -330,13 +566,8 @@ function renderSingle(g, src){
   drawBrand(g, 0, H - band, W, band, 'left');
 }
 
-function composePhoto(src){
-  const c = mk(src.width, src.height);
-  renderSingle(c.getContext('2d'), src);
-  return c;
-}
+function composePhoto(src){ const c = mk(src.width, src.height); renderSingle(c.getContext('2d'), src); return c; }
 
-/* Grid: 1920x1280, four 16:9 cells, name band along the bottom */
 function composeGrid(shots){
   const W = 1920, m = 24, cw = (W - 3 * m) / 2, ch = Math.round(cw * 9 / 16), band = 168;
   const H = 2 * ch + 3 * m + band;   // 1280
@@ -348,7 +579,6 @@ function composeGrid(shots){
   return c;
 }
 
-/* Strip: 1080x2700, four 16:9 cells stacked, name band along the bottom */
 function composeStrip(shots){
   const W = 1080, m = 36, cw = W - 2 * m, ch = Math.round(cw * 9 / 16), band = 252;
   const H = 4 * ch + 5 * m + band;   // 2700
@@ -362,18 +592,21 @@ function composeStrip(shots){
 
 const toJpeg = c => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/jpeg', 0.9));
 
-/* ---------- Boomerang ---------- */
-async function recordBoomerang(){
-  const B = CONFIG.BOOMERANG;
-  show('countdown');
-  $('count').textContent = '';
-  const lab = $('cdLabel');
-  lab.hidden = false; lab.classList.add('rec'); lab.textContent = '● Keep moving!';
-  const w = even(B.width), h = even(w * video.videoHeight / video.videoWidth);
-  const frames = [];
-  for (let i = 0; i < B.frames; i++){ frames.push(grab(w, h)); await sleep(B.intervalMs); }
-  lab.classList.remove('rec');
-  return frames.concat(frames.slice(1, -1).reverse());   // forward, then back
+/* ---------- GIF and MP4 encoding ---------- */
+async function encodeGif(frames, width, delay){
+  const { GIFEncoder, quantize, applyPalette } = await import('https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js');
+  const w = even(width), h = even(w * frames[0].height / frames[0].width);
+  const c = mk(w, h), g = c.getContext('2d', { willReadFrequently: true });
+  const gif = GIFEncoder();
+  for (const f of frames){
+    renderSingle(g, f);
+    const { data } = g.getImageData(0, 0, w, h);
+    const palette = quantize(data, 256);
+    gif.writeFrame(applyPalette(data, palette), w, h, { palette, delay });
+    await sleep(0);
+  }
+  gif.finish();
+  return new Blob([gif.bytes()], { type: 'image/gif' });
 }
 
 async function encodeMp4(seq, mime){
@@ -396,61 +629,59 @@ async function encodeMp4(seq, mime){
   return blob;
 }
 
-async function encodeGif(seq){
+async function recordBoomerang(){
   const B = CONFIG.BOOMERANG;
-  const { GIFEncoder, quantize, applyPalette } = await import('https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js');
-  const w = even(B.gifWidth), h = even(w * seq[0].height / seq[0].width);
-  const c = mk(w, h), g = c.getContext('2d', { willReadFrequently: true });
-  const gif = GIFEncoder();
-  for (const f of seq){
-    renderSingle(g, f);
-    const { data } = g.getImageData(0, 0, w, h);
-    const palette = quantize(data, 256);
-    gif.writeFrame(applyPalette(data, palette), w, h, { palette, delay: Math.round(1000 / B.fps) });
-    await sleep(0);   // keep the spinner moving
-  }
-  gif.finish();
-  return new Blob([gif.bytes()], { type: 'image/gif' });
+  show('countdown');
+  $('count').textContent = '';
+  const lab = $('cdLabel');
+  lab.hidden = false; lab.classList.add('rec'); lab.textContent = '● Keep moving!';
+  const w = even(B.width), h = even(w * video.videoHeight / video.videoWidth);
+  const frames = [];
+  for (let i = 0; i < B.frames; i++){ frames.push(grab(w, h)); await sleep(B.intervalMs); }
+  lab.classList.remove('rec');
+  return frames.concat(frames.slice(1, -1).reverse());
 }
 
 async function encodeBoomerang(seq){
-  const fmt = CONFIG.BOOMERANG.format;
-  const canMp4 = fmt !== 'gif' && window.MediaRecorder && HTMLCanvasElement.prototype.captureStream;
+  const B = CONFIG.BOOMERANG;
+  const canMp4 = B.format !== 'gif' && window.MediaRecorder && HTMLCanvasElement.prototype.captureStream;
   const mime = canMp4 ? MP4_TYPES.find(t => MediaRecorder.isTypeSupported(t)) : null;
   if (mime){
     try { return await encodeMp4(seq, mime); }
     catch (e){ console.warn('MP4 failed, falling back to GIF', e); }
   }
-  return encodeGif(seq);
+  return encodeGif(seq, B.gifWidth, Math.round(1000 / B.fps));
 }
 
-/* ---------- Run a session ---------- */
+/* ---------- Photo, collage and boomerang sessions ---------- */
 async function run(mode, layout){
   if (busy) return;
   busy = true; clearTimer();
   current = { mode, layout };
   try{
-    let blob;
+    let blob, base = null, shots = null;
     if (mode === 'photo'){
       await countdown(CONFIG.COUNTDOWN, '');
       const shot = grab(); flash();
-      blob = await toJpeg(composePhoto(shot));
+      base = composePhoto(shot);
+      blob = await toJpeg(base);
     } else if (mode === 'collage'){
-      const shots = [];
+      shots = [];
       for (let k = 0; k < 4; k++){
         await countdown(k ? CONFIG.COLLAGE_GAP_SECONDS : CONFIG.COUNTDOWN, `Photo ${k + 1} of 4`);
         shots.push(grab()); flash();
         await sleep(350);
       }
-      blob = await toJpeg(layout === 'strip' ? composeStrip(shots) : composeGrid(shots));
+      base = layout === 'strip' ? composeStrip(shots) : composeGrid(shots);
+      blob = await toJpeg(base);
     } else {
       await countdown(CONFIG.COUNTDOWN, 'Boomerang');
       const seq = await recordBoomerang();
+      $('procText').textContent = 'Making your boomerang…';
       show('processing');
       blob = await encodeBoomerang(seq);
     }
-    if (result) URL.revokeObjectURL(result.url);
-    result = { blob, mime: blob.type, url: URL.createObjectURL(blob) };
+    setResult(blob, base, shots);
     review();
   }catch(e){
     console.error(e);
@@ -460,52 +691,296 @@ async function run(mode, layout){
   }
 }
 
-function setMedia(box, r){
+function setResult(blob, base, shots){
+  if (result) URL.revokeObjectURL(result.url);
+  result = { blob, mime: blob.type, url: URL.createObjectURL(blob), base, shots };
+}
+
+/* ---------- Video guestbook ---------- */
+async function runGuestbook(){
+  if (busy) return;
+  busy = true; clearTimer();
+  current = { mode: 'guestbook' };
+  try{
+    if (!micStream){
+      try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e){ micStream = null; console.warn('No microphone', e); }
+    }
+    await countdown(CONFIG.COUNTDOWN, 'Get ready');
+    const blob = await recordMessage();
+    setResult(blob, null, null);
+    review();
+  }catch(e){
+    console.error(e);
+    showError('Recording isn\'t available on this device. Tap to start over.', home);
+  }finally{
+    busy = false;
+  }
+}
+
+function recordMessage(){
+  return new Promise((res, rej) => {
+    const mime = window.MediaRecorder ? REC_TYPES.find(t => MediaRecorder.isTypeSupported(t)) : null;
+    if (!mime) return rej(new Error('MediaRecorder not supported'));
+    const tracks = [...stream.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])];
+    const rec = new MediaRecorder(new MediaStream(tracks), { mimeType: mime, videoBitsPerSecond: 2500000 });
+    const chunks = [];
+    let left = CONFIG.GUESTBOOK.seconds, tick = null;
+    const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    const stop = () => { if (rec.state !== 'inactive') rec.stop(); };
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onerror = e => { clearInterval(tick); rej(e.error || e); };
+    rec.onstop = () => {
+      clearInterval(tick);
+      const b = new Blob(chunks, { type: mime.split(';')[0] });
+      b.size ? res(b) : rej(new Error('empty recording'));
+    };
+    show('recording');
+    $('recMic').hidden = !!micStream;
+    $('recTime').textContent = '● ' + fmt(left);
+    $('recStop').onclick = stop;
+    rec.start(1000);
+    tick = setInterval(() => {
+      left--;
+      $('recTime').textContent = '● ' + fmt(Math.max(left, 0));
+      if (left <= 0) stop();
+    }, 1000);
+  });
+}
+
+/* ---------- Stickers ---------- */
+const SVG = s => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+function starSvg(){
+  let p = '';
+  for (let i = 0; i < 10; i++){
+    const r = i % 2 ? 40 : 90, a = Math.PI / 5 * i - Math.PI / 2;
+    p += (i ? 'L' : 'M') + (100 + r * Math.cos(a)).toFixed(1) + ' ' + (104 + r * Math.sin(a)).toFixed(1);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path d="${p}Z" fill="#FFC23D" stroke="#fff" stroke-width="8" stroke-linejoin="round"/></svg>`;
+}
+const bubble = (text, color) => `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="150" viewBox="0 0 260 150"><path d="M30 10H230a22 22 0 0 1 22 22V92a22 22 0 0 1-22 22H100L60 142l6-28H30A22 22 0 0 1 8 92V32A22 22 0 0 1 30 10Z" fill="#fff" stroke="#10233F" stroke-width="7" stroke-linejoin="round"/><text x="130" y="79" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="46" fill="${color}">${text}</text></svg>`;
+const BUILTIN_STICKERS = [
+  `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path d="M100 174C40 130 18 100 18 68c0-26 20-46 44-46 17 0 30 9 38 22 8-13 21-22 38-22 24 0 44 20 44 46 0 32-22 62-82 106Z" fill="#FF5A6E" stroke="#fff" stroke-width="8" stroke-linejoin="round"/><path d="M52 56c6-8 16-12 24-10" stroke="#fff" stroke-width="9" stroke-linecap="round" fill="none" opacity=".7"/></svg>`,
+  starSvg(),
+  `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="170" viewBox="0 0 220 170"><path d="M28 132L40 40 78 86 110 22 142 86 180 40 192 132Z" fill="#FFC23D" stroke="#fff" stroke-width="8" stroke-linejoin="round"/><rect x="26" y="128" width="168" height="28" rx="8" fill="#FFC23D" stroke="#fff" stroke-width="8"/><circle cx="110" cy="142" r="7" fill="#FF5A6E"/><circle cx="70" cy="142" r="6" fill="#7C6CF2"/><circle cx="150" cy="142" r="6" fill="#7C6CF2"/></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path d="M100 14C108 74 122 88 182 96 122 104 108 118 100 178 92 118 78 104 18 96 78 88 92 74 100 14Z" fill="#FFC23D" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><path d="M160 130C163 150 168 155 188 158 168 161 163 166 160 186 157 166 152 161 132 158 152 155 157 150 160 130Z" fill="#FF8FB1" stroke="#fff" stroke-width="5" stroke-linejoin="round"/></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100" viewBox="0 0 240 100"><path d="M8 26H232" stroke="#10233F" stroke-width="10" stroke-linecap="round"/><rect x="18" y="22" width="90" height="62" rx="24" fill="#10233F"/><rect x="132" y="22" width="90" height="62" rx="24" fill="#10233F"/><path d="M38 40h26M152 40h26" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".55"/></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="220" viewBox="0 0 200 220"><path d="M100 32L162 196H38Z" fill="#7C6CF2" stroke="#fff" stroke-width="8" stroke-linejoin="round"/><path d="M70 120H130M56 160H144" stroke="#FFC23D" stroke-width="12" stroke-linecap="round"/><circle cx="100" cy="26" r="18" fill="#FF6F59" stroke="#fff" stroke-width="6"/></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100" viewBox="0 0 240 100"><path d="M120 40C104 16 70 14 52 32 40 46 28 52 14 44 10 66 30 84 58 80 86 76 106 62 120 52 134 62 154 76 182 80 210 84 230 66 226 44 212 52 200 46 188 32 170 14 136 16 120 40Z" fill="#3B2A20" stroke="#fff" stroke-width="6" stroke-linejoin="round"/></svg>`,
+  bubble('Cheers!', '#FF6F59'),
+  bubble('Love it!', '#E0457B')
+].map(SVG);
+
+let stickers = [], selected = null;
+const pointers = new Map();
+let gesture = null;
+
+function buildTray(){
+  $('tray').innerHTML = '';
+  stickerImgs.forEach((img, i) => {
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', 'Add sticker ' + (i + 1));
+    const t = document.createElement('img'); t.src = img.src; t.alt = '';
+    b.appendChild(t);
+    b.onclick = () => { bumpReview(); addSticker(img); };
+    $('tray').appendChild(b);
+  });
+}
+
+function editorWrap(){ return $('reviewMedia').querySelector('.ed'); }
+
+function addSticker(img){
+  const wrap = editorWrap(); if (!wrap) return;
+  const el = document.createElement('div');
+  el.className = 'stk';
+  const i = document.createElement('img'); i.src = img.src; i.alt = '';
+  el.appendChild(i);
+  wrap.appendChild(el);
+  const s = { img, el, x: .5 + (Math.random() - .5) * .2, y: .45 + (Math.random() - .5) * .2, s: .2, r: 0 };
+  stickers.push(s);
+  place(s); select(s);
+}
+
+function place(s){
+  s.el.style.left = (s.x * 100) + '%';
+  s.el.style.top = (s.y * 100) + '%';
+  s.el.style.width = (s.s * 100) + '%';
+  s.el.style.transform = `translate(-50%,-50%) rotate(${s.r}rad)`;
+}
+
+function select(s){
+  selected = s;
+  stickers.forEach(t => t.el.classList.toggle('sel', t === s));
+  $('stkctl').hidden = !s;
+}
+
+function snapGesture(){
+  gesture = selected ? { st: { x: selected.x, y: selected.y, s: selected.s, r: selected.r },
+                         pts: [...pointers.values()].map(p => ({ ...p })) } : null;
+}
+
+function setupEditor(wrap){
+  wrap.addEventListener('pointerdown', e => {
+    bumpReview();
+    const hit = e.target.closest('.stk');
+    if (hit) select(stickers.find(s => s.el === hit));
+    else if (!pointers.size) { select(null); return; }
+    if (!selected) return;
+    wrap.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    snapGesture();
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId) || !selected || !gesture) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const box = wrap.getBoundingClientRect();
+    const pts = [...pointers.values()], p0 = gesture.pts, st = gesture.st;
+    if (pts.length >= 2 && p0.length >= 2){
+      const d = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      const d0 = Math.hypot(p0[1].x - p0[0].x, p0[1].y - p0[0].y) || 1;
+      const a = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+      const a0 = Math.atan2(p0[1].y - p0[0].y, p0[1].x - p0[0].x);
+      const mx = (pts[0].x + pts[1].x) / 2 - (p0[0].x + p0[1].x) / 2;
+      const my = (pts[0].y + pts[1].y) / 2 - (p0[0].y + p0[1].y) / 2;
+      selected.s = clamp(st.s * d / d0, .05, 1);
+      selected.r = st.r + a - a0;
+      selected.x = clamp(st.x + mx / box.width, 0, 1);
+      selected.y = clamp(st.y + my / box.height, 0, 1);
+    } else if (pts.length === 1 && p0.length >= 1){
+      selected.x = clamp(st.x + (pts[0].x - p0[0].x) / box.width, 0, 1);
+      selected.y = clamp(st.y + (pts[0].y - p0[0].y) / box.height, 0, 1);
+    }
+    place(selected);
+  });
+  const end = e => { if (pointers.delete(e.pointerId)) snapGesture(); };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
+}
+
+$('stkBigger').onclick = () => { if (!selected) return; bumpReview(); selected.s = clamp(selected.s * 1.2, .05, 1); place(selected); };
+$('stkSmaller').onclick = () => { if (!selected) return; bumpReview(); selected.s = clamp(selected.s / 1.2, .05, 1); place(selected); };
+$('stkRemove').onclick = () => {
+  if (!selected) return;
+  bumpReview();
+  selected.el.remove();
+  stickers = stickers.filter(s => s !== selected);
+  select(null);
+};
+
+function flatten(base){
+  const W = base.width, H = base.height;
+  const c = mk(W, H), g = c.getContext('2d');
+  g.drawImage(base, 0, 0);
+  for (const s of stickers){
+    const w = s.s * W, h = w * (s.img.naturalHeight / s.img.naturalWidth);
+    g.save(); g.translate(s.x * W, s.y * H); g.rotate(s.r);
+    g.drawImage(s.img, -w / 2, -h / 2, w, h);
+    g.restore();
+  }
+  return c;
+}
+
+/* ---------- Review ---------- */
+function setMedia(box, r, opts = {}){
   box.innerHTML = '';
   let el;
   if (r.mime.startsWith('video/')){
     el = document.createElement('video');
-    el.muted = true; el.loop = true; el.autoplay = true; el.setAttribute('playsinline', '');
+    el.loop = true; el.autoplay = true; el.setAttribute('playsinline', '');
+    el.muted = !opts.sound; el.controls = !!opts.sound;
   } else {
     el = document.createElement('img');
     el.alt = 'Your photo';
   }
   el.src = r.url;
-  box.appendChild(el);
+  if (opts.editable){
+    const wrap = document.createElement('div');
+    wrap.className = 'ed';
+    wrap.appendChild(el);
+    box.appendChild(wrap);
+    setupEditor(wrap);
+  } else box.appendChild(el);
   if (el.play) el.play().catch(() => {});
 }
 
+let reviewLeft = 0, reviewSec = 0;
+function keepLabel(){
+  const base = current.mode === 'guestbook' ? 'Save message' : 'Get my photo';
+  $('keep').textContent = `${base} (${reviewLeft})`;
+}
+function bumpReview(){ reviewLeft = Math.max(reviewLeft, reviewSec); keepLabel(); }
+
 function review(){
-  setMedia($('reviewMedia'), result);
+  stickers = []; selected = null; pointers.clear();
+  const editable = CONFIG.STICKERS && !!result.base && stickerImgs.length > 0;
+  setMedia($('reviewMedia'), result, { editable, sound: current.mode === 'guestbook' });
+  $('stickerbar').hidden = !editable;
+  $('review').classList.toggle('stickers', editable);
+  $('stkctl').hidden = true;
   show('review');
-  let left = CONFIG.REVIEW_SECONDS;
-  const keep = $('keep');
-  keep.textContent = `Get my photo (${left})`;
+  reviewSec = current.mode === 'guestbook' ? CONFIG.GUESTBOOK.reviewSeconds : CONFIG.REVIEW_SECONDS;
+  reviewLeft = reviewSec;
+  keepLabel();
+  clearTimer();
   timer = setInterval(() => {
-    left--;
-    keep.textContent = `Get my photo (${left})`;
-    if (left <= 0) accept();
+    reviewLeft--;
+    keepLabel();
+    if (reviewLeft <= 0) accept();
   }, 1000);
 }
 
-$('retake').onclick = () => { clearTimer(); run(current.mode, current.layout); };
+$('retake').onclick = () => {
+  clearTimer();
+  if (current.mode === 'guestbook') runGuestbook();
+  else run(current.mode, current.layout);
+};
 $('keep').onclick = accept;
-$('done').onclick = home;
 
 async function accept(){
   clearTimer();
-  const id = makeId();
-  const data = await blobToB64(result.blob);
-  await queue.put({ id, data, mime: result.mime, at: Date.now() });
+  const sid = makeId();
+  const mode = current.mode;
+
+  if (mode === 'guestbook'){
+    await queue.put({ id: sid + '__message', sid, part: 'message', event: EVENT.id, meta: { mode: 'guestbook' },
+                      data: await blobToB64(result.blob), mime: result.mime, at: Date.now() });
+    processQueue();
+    $('reviewMedia').innerHTML = '';
+    show('thanks');
+    timer = setTimeout(home, 5000);
+    return;
+  }
+
+  const meta = { mode, layout: current.layout || '', filter: filterKey, stickers: stickers.length };
+  if (result.base && stickers.length){
+    const blob = await toJpeg(flatten(result.base));
+    setResult(blob, result.base, result.shots);
+  }
+  const shots = result.shots;
+  const anim = mode === 'collage' && CONFIG.ANIMATED_COLLAGE && shots;
+
+  const eventId = EVENT.id;
+  await queue.put({ id: sid, sid, part: '', event: eventId, meta,
+                    data: await blobToB64(result.blob), mime: result.mime, at: Date.now() });
   processQueue();
 
   setMedia($('shareMedia'), result);
   const qr = $('qr');
   qr.innerHTML = '';
-  new QRCode(qr, { text: CONFIG.UPLOAD_URL + '?id=' + id, width: 300, height: 300,
+  const link = CONFIG.UPLOAD_URL.trim() + '?id=' + sid + (eventId ? '&e=' + eventId : '') + (anim ? '&n=2' : '');
+  new QRCode(qr, { text: link, width: 300, height: 300,
                    correctLevel: QRCode.CorrectLevel.M });
   show('share');
   timer = setTimeout(home, CONFIG.QR_SECONDS * 1000);
+
+  if (anim){
+    try{
+      const gif = await encodeGif(shots, 960, CONFIG.ANIMATED_DELAY_MS);
+      await queue.put({ id: sid + '__anim', sid, part: 'anim', event: eventId, meta: { mode: 'collage', layout: meta.layout },
+                        data: await blobToB64(gif), mime: 'image/gif', at: Date.now() });
+      processQueue();
+    }catch(e){ console.warn('Animated collage failed', e); }
+  }
 }
 
 function blobToB64(b){
@@ -525,33 +1000,44 @@ function makeId(){
 }
 
 /* ---------- Upload queue (survives slow Wi-Fi and page reloads) ---------- */
-const queue = (() => {
-  const mem = new Map();
+const db = (() => {
   let dbp;
   try{
     dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('booth', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('q', { keyPath: 'id' });
+      const r = indexedDB.open('booth', 2);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains('q')) d.createObjectStore('q', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+      };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
     dbp.catch(() => {});
   }catch(e){ dbp = Promise.reject(e); dbp.catch(() => {}); }
-
-  const tx = async (mode, fn) => {
-    const db = await dbp;
+  return async (store, mode, fn) => {
+    const d = await dbp;
     return new Promise((res, rej) => {
-      const t = db.transaction('q', mode);
-      const req = fn(t.objectStore('q'));
+      const t = d.transaction(store, mode);
+      const req = fn(t.objectStore(store));
       t.oncomplete = () => res(req && req.result);
       t.onerror = () => rej(t.error);
     });
   };
+})();
+
+const kv = {
+  async get(k){ try{ return await db('kv', 'readonly', s => s.get(k)); }catch(e){ return null; } },
+  async set(k, v){ try{ await db('kv', 'readwrite', s => s.put(v, k)); }catch(e){} }
+};
+
+const queue = (() => {
+  const mem = new Map();
   return {
-    async put(item){ mem.set(item.id, item); try{ await tx('readwrite', s => s.put(item)); }catch(e){} },
-    async del(id){ mem.delete(id); try{ await tx('readwrite', s => s.delete(id)); }catch(e){} },
+    async put(item){ mem.set(item.id, item); try{ await db('q', 'readwrite', s => s.put(item)); }catch(e){} },
+    async del(id){ mem.delete(id); try{ await db('q', 'readwrite', s => s.delete(id)); }catch(e){} },
     async all(){
-      try{ (await tx('readonly', s => s.getAll()) || []).forEach(i => mem.set(i.id, i)); }catch(e){}
+      try{ (await db('q', 'readonly', s => s.getAll()) || []).forEach(i => mem.set(i.id, i)); }catch(e){}
       return [...mem.values()].sort((a, b) => a.at - b.at);
     }
   };
@@ -562,24 +1048,26 @@ function explain(err){
   if (err === 'bad key') return "upload key doesn't match Code.gs";
   if (/no item with the given id|not found/i.test(err)) return 'FOLDER_ID in Code.gs is wrong';
   if (/access denied|permission/i.test(err)) return 'script has no access to the Drive folder';
-  if (/unsupported type/i.test(err)) return 'Code.gs is an old version; redeploy the new one';
+  if (/unsupported type|bad part/i.test(err)) return 'Code.gs is an old version; redeploy the new one';
   return err;
 }
 async function processQueue(){
   if (uploading) return;
   uploading = true;
   try{
-    if (/PASTE_|^\s*$/.test(CONFIG.UPLOAD_URL) || !/\/exec$/.test(CONFIG.UPLOAD_URL.trim())){
+    const url = CONFIG.UPLOAD_URL.trim();
+    if (/PASTE_/.test(url) || !/\/exec$/.test(url)){
       if ((await queue.all()).length) lastError = "UPLOAD_URL isn't set to the script's /exec address";
       return;
     }
     for (const item of await queue.all()){
       let r, text, res;
       try{
-        r = await fetch(CONFIG.UPLOAD_URL.trim(), {
+        r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
-          body: JSON.stringify({ key: CONFIG.UPLOAD_KEY, id: item.id,
+          body: JSON.stringify({ key: CONFIG.UPLOAD_KEY, id: item.sid || item.id, part: item.part || '',
+                                 event: item.event || '', meta: item.meta || {},
                                  mime: item.mime || 'image/jpeg', image: item.data || item.image })
         });
       }catch(e){
@@ -606,7 +1094,7 @@ async function processQueue(){
 async function updatePending(){
   const n = (await queue.all()).length;
   const el = $('pending');
-  const base = n === 1 ? '1 photo waiting to upload' : `${n} photos waiting to upload`;
+  const base = n === 1 ? '1 file waiting to upload' : `${n} files waiting to upload`;
   el.textContent = lastError ? `${base} · ${lastError}` : base;
   el.classList.toggle('on', n > 0);
 }
@@ -625,14 +1113,176 @@ function loadImage(src){
   });
 }
 
-(async () => {
-  const F = CONFIG.FRAMES || {};
+/* ---------- Event settings from the admin page ---------- */
+let EVENT = { id: '', name: '', updatedAt: 0 }, cfgLoadedAt = 0, cfgError = '', pinHash = '';
+const LOCAL_ASSETS = { logo: CONFIG.LOGO_URL, frames: Object.assign({}, CONFIG.FRAMES), stickers: CONFIG.CUSTOM_STICKERS || [] };
+const SETTING_KEYS = ['EVENT_NAME', 'EVENT_LINE', 'ACCENT', 'THEME', 'MODES', 'COLLAGE_LAYOUTS', 'FILTERS', 'STICKERS',
+  'LIVE_FRAME', 'MIRROR_PHOTOS', 'ANIMATED_COLLAGE', 'ANIMATED_DELAY_MS', 'GUESTBOOK', 'COUNTDOWN',
+  'COLLAGE_GAP_SECONDS', 'REVIEW_SECONDS', 'QR_SECONDS'];
+
+async function fetchConfig(){
+  const url = CONFIG.UPLOAD_URL.trim();
+  if (/PASTE_/.test(url) || !/\/exec$/.test(url)) throw new Error("UPLOAD_URL isn't set");
+  const r = await fetch(url + '?config=1', { cache: 'no-store' });
+  const text = await r.text();
+  let cfg;
+  try { cfg = JSON.parse(text); }
+  catch (e) { throw new Error(/accounts\.google|sign in/i.test(text) ? 'script asks for sign-in; set access to Anyone' : 'unexpected reply'); }
+  if (!cfg.ok) throw new Error(cfg.error || 'config error');
+  return cfg;
+}
+
+async function applyConfig(cfg){
+  if (cfg){
+    SETTING_KEYS.forEach(k => { if (cfg.settings && cfg.settings[k] !== undefined) CONFIG[k] = cfg.settings[k]; });
+    EVENT = cfg.event || EVENT;
+    pinHash = cfg.pinHash || pinHash;
+  }
+  const A = (cfg && cfg.assets) || {}, F = A.frames || {}, L = LOCAL_ASSETS.frames || {};
   const [logo, fp, fg, fs] = await Promise.all([
-    loadImage(CONFIG.LOGO_URL), loadImage(F.photo), loadImage(F.grid), loadImage(F.strip)]);
+    loadImage(A.logo || LOCAL_ASSETS.logo), loadImage(F.photo || L.photo), loadImage(F.grid || L.grid), loadImage(F.strip || L.strip)]);
   logoImg = logo; frameImgs = { photo: fp, grid: fg, strip: fs };
+  if (fp) $('liveFrame').src = fp.src; else $('liveFrame').removeAttribute('src');
+  const custom = (A.stickers && A.stickers.length) ? A.stickers : LOCAL_ASSETS.stickers;
+  stickerImgs = CONFIG.STICKERS
+    ? (await Promise.all([...BUILTIN_STICKERS, ...custom].map(loadImage))).filter(Boolean) : [];
+  buildTray();
+  buildStart();
+  if ($('attract').classList.contains('on')) show('attract');
+}
+
+async function refreshConfig(force){
+  try{
+    const cfg = await fetchConfig();
+    cfgError = '';
+    cfgLoadedAt = Date.now();
+    if (force || cfg.event.id !== EVENT.id || cfg.event.updatedAt !== EVENT.updatedAt){
+      await applyConfig(cfg);
+      await kv.set('config', cfg);
+    }
+    return true;
+  }catch(e){
+    cfgError = String(e.message || e);
+    return false;
+  }
+}
+setInterval(() => { if (!busy && $('attract').classList.contains('on')) refreshConfig(false); }, 5 * 60 * 1000);
+
+/* ---------- Hidden operator menu: long-press the top-left corner ---------- */
+let pressTimer = null, pinEntry = '', opPin = '', opTimer = null;
+$('opHot').addEventListener('pointerdown', () => {
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => { if (!busy) openPin(); }, 2000);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(t => $('opHot').addEventListener(t, () => clearTimeout(pressTimer)));
+
+function openPin(){
+  clearTimer();
+  pinEntry = '';
+  drawPin();
+  $('pinMsg').textContent = pinHash ? '' : "The PIN hasn't loaded yet. Connect the booth to the internet and wait a moment.";
+  show('opPin');
+  timer = setTimeout(home, 60000);
+}
+function drawPin(){ $('pinDots').innerHTML = '<i></i>'.repeat(pinEntry.length); }
+
+async function sha256Hex(s){
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+$('pinPad').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const k = b.dataset.k;
+  if (k === 'clear'){ pinEntry = ''; drawPin(); return; }
+  if (k !== 'ok'){ if (pinEntry.length < 10){ pinEntry += b.textContent; drawPin(); } return; }
+  if (pinHash && pinEntry && await sha256Hex(pinEntry) === pinHash){
+    opPin = pinEntry; pinEntry = '';
+    openMenu();
+  } else {
+    pinEntry = ''; drawPin();
+    $('pinMsg').textContent = pinHash ? 'Wrong PIN.' : "The PIN hasn't loaded yet.";
+  }
+};
+$('pinCancel').onclick = home;
+
+function openMenu(){
+  clearTimer();
+  $('opEvents').hidden = true;
+  $('opMsg').textContent = '';
+  show('opMenu');
+  drawStatus();
+  clearInterval(opTimer);
+  opTimer = setInterval(() => { if ($('opMenu').classList.contains('on')) drawStatus(); else clearInterval(opTimer); }, 2000);
+  bumpMenu();
+}
+function bumpMenu(){ clearTimer(); timer = setTimeout(closeMenu, 120000); }
+function closeMenu(){ clearInterval(opTimer); opPin = ''; home(); }
+
+async function drawStatus(){
+  const n = (await queue.all()).length;
+  const t = cfgLoadedAt ? new Date(cfgLoadedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'not yet';
+  const track = stream && stream.getVideoTracks()[0];
+  const st = track ? track.getSettings() : null;
+  const row = (k, v, cls) => `<div><span>${k}</span><span class="${cls || ''}">${v}</span></div>`;
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  $('opStatus').innerHTML =
+    row('Event', esc(CONFIG.EVENT_NAME)) +
+    row('Settings loaded', cfgError ? 'failed: ' + esc(cfgError) : t, cfgError ? 'bad' : '') +
+    row('Camera', st ? `${st.width} × ${st.height}` : 'not running', st ? 'good' : 'bad') +
+    row('Microphone', micStream ? 'allowed' : 'not used yet') +
+    row('Internet', navigator.onLine ? 'online' : 'offline', navigator.onLine ? 'good' : 'bad') +
+    row('Waiting to upload', n ? `${n}${lastError ? ' · ' + esc(lastError) : ''}` : 'none', n ? 'bad' : 'good');
+}
+
+$('opRetry').onclick = async () => { bumpMenu(); $('opMsg').textContent = 'Retrying…'; await processQueue(); drawStatus(); $('opMsg').textContent = lastError ? 'Still failing: ' + lastError : 'Upload queue checked.'; };
+$('opReload').onclick = async () => { bumpMenu(); $('opMsg').textContent = 'Loading settings…'; const ok = await refreshConfig(true); drawStatus(); $('opMsg').textContent = ok ? 'Settings reloaded for ' + CONFIG.EVENT_NAME + '.' : 'Could not load settings: ' + cfgError; };
+$('opRestart').onclick = () => location.reload();
+$('opClose').onclick = closeMenu;
+
+$('opSwitch').onclick = async () => {
+  bumpMenu();
+  $('opMsg').textContent = 'Loading events…';
+  try{
+    const r = await opPost({ action: 'events' });
+    $('opEvents').innerHTML = r.events.map(e =>
+      `<button data-id="${e.id}" class="${e.id === EVENT.id ? 'cur' : ''}"></button>`).join('');
+    [...$('opEvents').children].forEach((b, i) => b.textContent = r.events[i].name);
+    $('opEvents').hidden = false;
+    $('opMsg').textContent = 'Tap an event to switch the booth to it.';
+  }catch(e){ $('opMsg').textContent = 'Could not load events: ' + e.message; }
+};
+$('opEvents').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  bumpMenu();
+  $('opMsg').textContent = 'Switching…';
+  try{
+    await opPost({ action: 'setActive', eventId: b.dataset.id });
+    await refreshConfig(true);
+    $('opEvents').hidden = true;
+    drawStatus();
+    $('opMsg').textContent = 'Switched to ' + CONFIG.EVENT_NAME + '.';
+  }catch(e){ $('opMsg').textContent = 'Could not switch: ' + e.message; }
+};
+
+async function opPost(body){
+  const r = await fetch(CONFIG.UPLOAD_URL.trim(), {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ key: CONFIG.UPLOAD_KEY, pin: opPin }, body))
+  });
+  const res = JSON.parse(await r.text());
+  if (!res.ok) throw new Error(res.error === 'bad key' ? "upload key doesn't match Code.gs" : res.error);
+  return res;
+}
+
+/* ---------- Start ---------- */
+(async () => {
+  const cached = await kv.get('config');
+  await applyConfig(cached || null);
   try{ await document.fonts.load('800 40px "Bricolage Grotesque"'); }catch(e){}
   FONT = getComputedStyle(document.body).fontFamily;
   await startCamera();
+  await refreshConfig(!cached);
   processQueue();
 })();
 </script>

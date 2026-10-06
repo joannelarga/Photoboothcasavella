@@ -11,9 +11,9 @@
 <script>
 /* ======================= EVENT SETTINGS ======================= */
 const CONFIG = {
-  UPLOAD_URL: 'https://script.google.com/macros/s/AKfycbxilYy4WQt-_xy1vy72uMppXL_y0_j-gtZR-1GfbwLkxEM8sat0qrdnabjgERoVsOQp9A/exec', // ends in /exec
-  UPLOAD_KEY: '3f8a2c71-9b4e-4d0a-a6c2-7e1f5b9d8c34',  // same as in Code.gs
-  EVENT_NAME: 'Happy Birthday Izza',
+  UPLOAD_URL: 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE', // ends in /exec
+  UPLOAD_KEY: 'CHANGE-ME-to-a-long-random-string',  // same as in Code.gs
+  EVENT_NAME: 'Our Event',
   EVENT_LINE: 'October 2026',      // smaller line under the name; '' to hide
   LOGO_URL: 'logo.png',            // must be on the same site as this page; '' to hide
   ACCENT: '#FF6F59',
@@ -130,7 +130,7 @@ const CONFIG = {
 
   #error{align-items:center;justify-content:center;text-align:center;padding:40px;background:var(--bg)}
   #error p{max-width:640px;font-size:30px}
-  #pending{position:fixed;top:16px;right:20px;font-size:15px;padding:6px 12px;border-radius:20px;
+  #pending{position:fixed;top:16px;right:20px;max-width:70vw;font-size:15px;padding:6px 12px;border-radius:20px;
     background:var(--pill);color:var(--fg);display:none}
   #pending.on{display:block}
 
@@ -557,24 +557,47 @@ const queue = (() => {
   };
 })();
 
-let uploading = false;
+let uploading = false, lastError = '';
+function explain(err){
+  if (err === 'bad key') return "upload key doesn't match Code.gs";
+  if (/no item with the given id|not found/i.test(err)) return 'FOLDER_ID in Code.gs is wrong';
+  if (/access denied|permission/i.test(err)) return 'script has no access to the Drive folder';
+  if (/unsupported type/i.test(err)) return 'Code.gs is an old version; redeploy the new one';
+  return err;
+}
 async function processQueue(){
   if (uploading) return;
   uploading = true;
   try{
-    for (const item of await queue.all()){
-      const r = await fetch(CONFIG.UPLOAD_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
-        body: JSON.stringify({ key: CONFIG.UPLOAD_KEY, id: item.id,
-                               mime: item.mime || 'image/jpeg', image: item.data || item.image })
-      });
-      const res = await r.json();
-      if (res.ok) await queue.del(item.id);
-      else { console.warn('Upload rejected', res.error); break; }
+    if (/PASTE_|^\s*$/.test(CONFIG.UPLOAD_URL) || !/\/exec$/.test(CONFIG.UPLOAD_URL.trim())){
+      if ((await queue.all()).length) lastError = "UPLOAD_URL isn't set to the script's /exec address";
+      return;
     }
-  }catch(e){
-    console.warn('Upload failed, will retry', e);
+    for (const item of await queue.all()){
+      let r, text, res;
+      try{
+        r = await fetch(CONFIG.UPLOAD_URL.trim(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
+          body: JSON.stringify({ key: CONFIG.UPLOAD_KEY, id: item.id,
+                                 mime: item.mime || 'image/jpeg', image: item.data || item.image })
+        });
+      }catch(e){
+        lastError = navigator.onLine === false ? 'no internet connection'
+          : "can't reach the script; check UPLOAD_URL and the internet";
+        break;
+      }
+      text = await r.text();
+      try{ res = JSON.parse(text); }
+      catch(e){
+        lastError = /accounts\.google|sign in/i.test(text)
+          ? 'script asks for sign-in; set Who has access to Anyone and redeploy'
+          : 'script sent an unexpected reply (HTTP ' + r.status + ')';
+        break;
+      }
+      if (res.ok){ await queue.del(item.id); lastError = ''; }
+      else { lastError = explain(String(res.error || 'unknown error')); break; }
+    }
   }finally{
     uploading = false;
     updatePending();
@@ -583,9 +606,11 @@ async function processQueue(){
 async function updatePending(){
   const n = (await queue.all()).length;
   const el = $('pending');
-  el.textContent = n === 1 ? '1 photo waiting to upload' : `${n} photos waiting to upload`;
+  const base = n === 1 ? '1 photo waiting to upload' : `${n} photos waiting to upload`;
+  el.textContent = lastError ? `${base} · ${lastError}` : base;
   el.classList.toggle('on', n > 0);
 }
+$('pending').onclick = processQueue;   // tap the label to retry now
 setInterval(processQueue, 10000);
 window.addEventListener('online', processQueue);
 
